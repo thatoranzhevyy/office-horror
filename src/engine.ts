@@ -40,12 +40,13 @@ export class Engine {
   physics?: Physics;
   map?: WorldMap;
   snapshot?: Snapshot;
+  private snapshotAt = 0;
   self?: Actor;
   audio = new Sound();
   private chunks = new Map<string, T.Group>();
   private remotes = new Map<string, Remote>();
   private traps = new Map<string, T.Mesh>();
-  private emergency = new Map<string, T.PointLight>();
+  private glowSticks = new Map<string, { mesh: T.Mesh; light: T.PointLight }>();
   private local?: T.Group;
   private flashlight: T.SpotLight;
   private flashTarget = new T.Object3D();
@@ -214,8 +215,18 @@ export class Engine {
     const newRound =
       this.snapshot?.phase !== "playing" && s.phase === "playing";
     this.snapshot = s;
-    if (!this.map || this.map.seed !== s.seed) {
-      this.map = new WorldMap(s.seed);
+    this.snapshotAt = performance.now();
+    if (!this.map || this.map.seed !== s.seed || this.map.side !== s.mapChunks) {
+      for (const [key, group] of this.chunks) {
+        this.scene.remove(group);
+        group.traverse((o) => {
+          if (o instanceof T.InstancedMesh) o.dispose();
+        });
+        this.physics.removeStatic(key);
+      }
+      this.chunks.clear();
+      this.explored.clear();
+      this.map = new WorldMap(s.seed, s.mapChunks);
     }
     for (const c of s.chunks) {
       this.map.chunks.set(c.key, c);
@@ -315,23 +326,28 @@ export class Engine {
         this.scene.add(mesh);
       }
     const lightKeys = new Set(s.lights.map((l) => l.key));
-    for (const [key, l] of this.emergency)
+    for (const [key, glow] of this.glowSticks)
       if (!lightKeys.has(key)) {
-        this.scene.remove(l);
-        l.dispose();
-        this.emergency.delete(key);
+        this.scene.remove(glow.mesh, glow.light);
+        glow.mesh.geometry.dispose();
+        glow.light.dispose();
+        this.glowSticks.delete(key);
       }
     for (const l of s.lights) {
-      if (!this.emergency.has(l.key)) {
-        const [x, z] = l.key.split(",").map(Number),
-          light = new T.PointLight(0xacc7d4, 140, 22, 1.4);
-        light.position.set(x * 16 + 8, 3.8, z * 16 + 8);
-        this.scene.add(light);
-        this.emergency.set(l.key, light);
+      if (!this.glowSticks.has(l.key)) {
+        const mesh = new T.Mesh(
+            new T.CylinderGeometry(0.09, 0.09, 0.72, 8),
+            this.models.material("#b4f89b"),
+          ),
+          light = new T.PointLight(0x8eea79, 35, 10, 1.7);
+        mesh.rotation.z = Math.PI / 2;
+        mesh.position.set(l.x, 0.13, l.z);
+        light.position.set(l.x, 0.38, l.z);
+        this.scene.add(mesh, light);
+        this.glowSticks.set(l.key, { mesh, light });
       }
-      const left = l.until - s.tick * DT;
-      this.emergency.get(l.key)!.intensity =
-        left > 1.2 || Math.floor(left * 9) % 2 === 0 ? 140 : 0;
+      this.glowSticks.get(l.key)!.light.intensity =
+        Math.min(1, Math.max(0, l.until - s.tick * DT) / 2) * 35;
     }
     this.patches.forEach((l, i) => {
       const p = s.patches[i];
@@ -373,8 +389,11 @@ export class Engine {
     this.effects.push({ mesh: spark, ttl: 0.12 });
   }
   private lit(x: number, z: number) {
-    const key = `${Math.floor(x / 16)},${Math.floor(z / 16)}`;
-    return (this.emergency.get(key)?.intensity ?? 0) > 0;
+    return (this.snapshot?.lights ?? []).some(
+      (l) =>
+        l.until > (this.snapshot?.tick ?? 0) * DT &&
+        Math.hypot(l.x - x, l.z - z) <= 8,
+    );
   }
   private fixed() {
     const p = this.self;
@@ -445,10 +464,10 @@ export class Engine {
     fan(false);
     ctx.save();
     ctx.beginPath();
-    for (const [key, l] of this.emergency)
-      if (l.intensity > 0) {
-        const [x, z] = key.split(",").map(Number);
-        ctx.rect(px(x * 16), pz(z * 16), 128, 128);
+    for (const { mesh, light } of this.glowSticks.values())
+      if (light.intensity > 0) {
+        ctx.moveTo(px(mesh.position.x) + 64, pz(mesh.position.z));
+        ctx.arc(px(mesh.position.x), pz(mesh.position.z), 64, 0, Math.PI * 2);
       }
     ctx.clip();
     fan(true);
@@ -642,6 +661,26 @@ export class Engine {
           Math.sin(now * 0.011 + j * Math.PI) *
           Math.min(0.55, Math.hypot(r.to.vx, r.to.vz) * 0.1);
     }
+    for (const l of this.snapshot?.lights ?? []) {
+      const glow = this.glowSticks.get(l.key);
+      if (!glow) continue;
+      const elapsed =
+          (this.snapshot!.tick * DT + (now - this.snapshotAt) / 1000 -
+            l.thrownAt) /
+          0.5,
+        t = T.MathUtils.clamp(elapsed, 0, 1),
+        height = Math.sin(Math.PI * t) * 1.15;
+      glow.mesh.position.set(
+        T.MathUtils.lerp(l.fromX, l.x, t),
+        0.13 + height,
+        T.MathUtils.lerp(l.fromZ, l.z, t),
+      );
+      glow.light.position.set(
+        glow.mesh.position.x,
+        glow.mesh.position.y + 0.25,
+        glow.mesh.position.z,
+      );
+    }
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const e = this.effects[i];
       e.ttl -= dt;
@@ -676,7 +715,11 @@ export class Engine {
     this.flashlight.dispose();
     this.muzzle.dispose();
     this.fill.dispose();
-    for (const l of [...this.emergency.values(), ...this.patches]) l.dispose();
+    for (const { mesh, light } of this.glowSticks.values()) {
+      mesh.geometry.dispose();
+      light.dispose();
+    }
+    for (const l of this.patches) l.dispose();
     for (const t of this.traps.values()) t.geometry.dispose();
     for (const e of this.effects) {
       const m = e.mesh as T.Mesh;

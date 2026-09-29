@@ -2,7 +2,7 @@
 import { computed } from "vue";
 const props = defineProps<{ name: string }>();
 const paths: Record<string, string> = {
-  power: "M12 2v10 M5 5a9 9 0 1 0 14 0",
+  glow: "M7 17 17 7 M5 19l2-2 M17 7l2-2 M4 7l1-2 M9 3l2 1 M18 16l2 1 M17 20l1-2",
   banana: "M18 3c1 8-3 13-11 13l-4-1c2 7 11 8 16 1 3-5 2-9-1-13Z M17 4l1-2",
   gun: "M3 7h18v6H10l-2 8H3l2-9H3V7Z M13 13v3h4l1-3",
   person: "M8 6a4 4 0 1 0 8 0 4 4 0 0 0-8 0 M4 22v-4a8 8 0 0 1 16 0v4",

@@ -38,6 +38,11 @@ export interface Trap {
 }
 export interface Light {
   key: string;
+  x: number;
+  z: number;
+  fromX: number;
+  fromZ: number;
+  thrownAt: number;
   until: number;
 }
 export interface GameEvent {
@@ -77,6 +82,7 @@ export interface Snapshot {
   events: GameEvent[];
   chunks: Chunk[];
   seed: number;
+  mapChunks: number;
   teamSize: number;
 }
 export const DT = 1 / 30;

@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { WorldMap, chunkBoxes, SIZE, hash, rng } from "../shared/map.ts";
+import {
+  WorldMap,
+  chunkBoxes,
+  SIZE,
+  hash,
+  rng,
+  mapChunksForPlayers,
+} from "../shared/map.ts";
 import { Physics, integrate } from "../shared/physics.ts";
 import {
   castRay,
@@ -60,7 +67,7 @@ export class Game {
   lastSeq = new Map<string, number>();
   lastShot = new Map<string, number>();
   traps = new Map<string, Trap>();
-  lights = new Map<string, Light>();
+  lights = new Map<string, Light & { owner: string }>();
   events: GameEvent[] = [];
   phase: Snapshot["phase"] = "lobby";
   winner = "";
@@ -68,6 +75,7 @@ export class Game {
   remaining = 300;
   random: () => number;
   private nextTrap = 0;
+  private nextLight = 0;
   private botGoal = new Map<string, { x: number; z: number }>();
   spawn(team: Team, index: number) {
     const lane =
@@ -76,7 +84,7 @@ export class Game {
     return {
       x: 6 + lane * 8 + (index % 2 ? 0.55 : -0.55),
       z:
-        (team === "ALPHA" ? 6 : 54) +
+        (team === "ALPHA" ? 6 : this.map.side * SIZE - 10) +
         (Math.floor((index % 4) / 2) ? 0.55 : -0.55),
     };
   }
@@ -144,6 +152,11 @@ export class Game {
       this.start();
   }
   start() {
+    const side = mapChunksForPlayers(this.players.size);
+    if (this.map.side !== side) {
+      this.map = new WorldMap(this.seed, side);
+      for (const key of this.physics.statics.keys()) this.physics.removeStatic(key);
+    }
     this.phase = "playing";
     this.winner = "";
     this.remaining = 300;
@@ -223,18 +236,32 @@ export class Game {
       if (!active.has(k)) this.map.chunks.delete(k);
   }
   lit(x: number, z: number) {
-    const l = this.lights.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`);
-    if (!l) return false;
-    const left = l.until - this.tick * DT;
-    return left > 1.2 || (left > 0 && Math.floor(left * 9) % 2 === 0);
+    return [...this.lights.values()].some(
+      (l) => l.until > this.tick * DT && Math.hypot(l.x - x, l.z - z) <= 8,
+    );
   }
   ability(p: Actor, action: number) {
     if (this.phase !== "playing" || p.hp <= 0 || p.slip > 0) return;
     if (action === 1 && p.lightCd <= 0) {
       p.lightCd = 24;
-      const key = `${Math.floor(p.x / 16)},${Math.floor(p.z / 16)}`;
-      this.lights.set(key, { key, until: this.tick * DT + 7 });
-      this.events.push({ kind: "power", x: p.x, z: p.z });
+      const dx = Math.sin(p.angle),
+        dz = Math.cos(p.angle),
+        distance = castRay(p.x, p.z, dx, dz, 6, this.map.boxes(p.x, p.z, 8, false)),
+        travel = Math.max(0, distance - 0.45),
+        x = p.x + dx * travel,
+        z = p.z + dz * travel,
+        key = `l${++this.nextLight}`;
+      this.lights.set(key, {
+        key,
+        x,
+        z,
+        fromX: p.x,
+        fromZ: p.z,
+        thrownAt: this.tick * DT,
+        until: this.tick * DT + 18,
+        owner: p.id,
+      });
+      this.events.push({ kind: "power", x, z });
     }
     if (action === 2 && p.bananaCd <= 0) {
       p.bananaCd = 12;
@@ -424,10 +451,10 @@ export class Game {
         }
       }
     const chunks = this.map.near(self.x, self.z),
-      active = new Set(chunks.map((c) => c.key));
+      active = new Set(chunks.map((c) => `${this.map.side}:${c.key}`));
     for (const k of known) if (!active.has(k)) known.delete(k);
-    const send = chunks.filter((c) => !known.has(c.key));
-    for (const c of send) known.add(c.key);
+    const send = chunks.filter((c) => !known.has(`${this.map.side}:${c.key}`));
+    for (const c of send) known.add(`${this.map.side}:${c.key}`);
     const events: GameEvent[] = [];
     for (const e of this.events) {
       const d = Math.hypot(e.x - self.x, e.z - self.z);
@@ -476,14 +503,22 @@ export class Game {
       traps: [...this.traps.values()]
         .filter(canSee)
         .map((t) => ({ ...t, owner: t.owner === id ? id : "" })),
-      lights: [...this.lights.values()].filter((l) => {
-        const [x, z] = l.key.split(",").map(Number);
-        return Math.hypot(x * 16 + 8 - self.x, z * 16 + 8 - self.z) < 48;
-      }),
+      lights: [...this.lights.values()]
+        .filter((l) => Math.hypot(l.x - self.x, l.z - self.z) < 48)
+        .map((l) => ({
+          key: l.key,
+          x: l.x,
+          z: l.z,
+          fromX: l.owner === id || ids.has(l.owner) ? l.fromX : l.x,
+          fromZ: l.owner === id || ids.has(l.owner) ? l.fromZ : l.z,
+          thrownAt: l.thrownAt,
+          until: l.until,
+        })),
       patches,
       events,
       chunks: send,
       seed: this.seed,
+      mapChunks: this.map.side,
       teamSize: this.teamSize,
     };
   }

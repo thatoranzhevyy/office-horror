@@ -36,6 +36,9 @@ export const PRESETS = [
   "COPY_ROOM",
   "ABANDONED_OFFICE",
 ];
+export function mapChunksForPlayers(players: number) {
+  return players <= 4 ? 1 : players <= 10 ? 2 : 3;
+}
 export function hash(seed: number, x: number, z: number): number {
   let h = (seed ^ Math.imul(x, 374761393) ^ Math.imul(z, 668265263)) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -188,12 +191,22 @@ export function chunkBoxes(c: Chunk, opaqueOnly = false): Box[] {
 }
 export class WorldMap {
   chunks = new Map<string, Chunk>();
-  constructor(public seed: number) {}
+  constructor(
+    public seed: number,
+    public side = 1,
+  ) {}
   get(cx: number, cz: number) {
+    if (cx < 0 || cz < 0 || cx >= this.side || cz >= this.side) return undefined;
     const key = `${cx},${cz}`;
     let c = this.chunks.get(key);
     if (!c) {
       c = generateChunk(this.seed, cx, cz);
+      for (let i = 0; i < CHUNK; i++) {
+        if (cx === 0) c.cells[i * CHUNK] = 1;
+        if (cx === this.side - 1) c.cells[i * CHUNK + CHUNK - 1] = 1;
+        if (cz === 0) c.cells[i] = 1;
+        if (cz === this.side - 1) c.cells[(CHUNK - 1) * CHUNK + i] = 1;
+      }
       this.chunks.set(key, c);
     }
     return c;
@@ -203,7 +216,10 @@ export class WorldMap {
       b = Math.floor(z / SIZE),
       out: Chunk[] = [];
     for (let dz = -r; dz <= r; dz++)
-      for (let dx = -r; dx <= r; dx++) out.push(this.get(a + dx, b + dz));
+      for (let dx = -r; dx <= r; dx++) {
+        const chunk = this.get(a + dx, b + dz);
+        if (chunk) out.push(chunk);
+      }
     return out;
   }
   boxes(x: number, z: number, r = 24, opaqueOnly = true) {
@@ -218,7 +234,9 @@ export class WorldMap {
         cx <= Math.floor((x + r) / SIZE);
         cx++
       ) {
-        for (const box of chunkBoxes(this.get(cx, cz), opaqueOnly))
+        const chunk = this.get(cx, cz);
+        if (!chunk) continue;
+        for (const box of chunkBoxes(chunk, opaqueOnly))
           if (Math.abs(box.x - x) < r + 2 && Math.abs(box.z - z) < r + 2)
             out.push(box);
       }

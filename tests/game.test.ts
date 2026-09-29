@@ -83,12 +83,82 @@ test("confirmed hits apply damage, reload restores ammo and light has cooldown",
   assert.equal(b.hp, 75);
   g.ability(a, 1);
   assert.equal(g.lights.size, 1);
+  const stick = [...g.lights.values()][0];
+  assert.equal(stick.fromX, a.x);
+  assert.equal(stick.fromZ, a.z);
+  assert.equal(stick.thrownAt, g.tick / 30);
+  assert.ok(stick.x > a.x && stick.x <= a.x + 6);
+  assert.equal(stick.z, a.z);
+  assert.equal(g.lit(stick.x, stick.z), true);
+  assert.equal(g.lit(stick.x + 9, stick.z), false);
+  assert.equal(g.snapshot(a.id, new Set()).lights[0].fromX, a.x);
   assert.ok(a.lightCd > 0);
   g.ability(a, 4);
   assert.ok(a.reload > 0);
   for (let i = 0; i < 65; i++) g.step();
   assert.equal(a.ammo, 12);
   g.dispose();
+});
+test("glow stick stops before a wall and expires", () => {
+  const g = new Game(1, 2);
+  const a = g.join("a", "ALPHA", 0),
+    b = g.join("b", "BRAVO", 0);
+  g.ready(a.id);
+  g.ready(b.id);
+  a.x = 5;
+  a.z = 5;
+  a.angle = Math.PI / 2;
+  g.map.boxes = () => [{ x: 8, z: 5, hx: 1, hz: 2 }];
+  g.ability(a, 1);
+  const stick = [...g.lights.values()][0];
+  assert.ok(stick.x < 7);
+  assert.ok(stick.x > a.x);
+  b.x = 12;
+  b.z = 5;
+  b.angle = -Math.PI / 2;
+  const hidden = g.snapshot(b.id, new Set()).lights[0];
+  assert.equal(hidden.fromX, hidden.x);
+  assert.equal(hidden.fromZ, hidden.z);
+  g.tick = Math.ceil(stick.until / (1 / 30)) + 1;
+  g.step();
+  assert.equal(g.lights.size, 0);
+  g.dispose();
+});
+test("arena grows with players when a round starts", () => {
+  for (const count of [2, 5, 11]) {
+    const g = new Game(count, 8);
+    for (let i = 0; i < count; i++)
+      g.join(String(i), i % 2 ? "BRAVO" : "ALPHA", 0);
+    for (const p of g.players.values()) g.ready(p.id);
+    const side = count <= 4 ? 1 : count <= 10 ? 2 : 3;
+    assert.equal(g.map.side, side);
+    const first = g.players.values().next().value!;
+    assert.equal(g.snapshot(first.id, new Set()).mapChunks, side);
+    g.dispose();
+  }
+});
+test("both teams spawn in clear, separate positions at every arena size", () => {
+  for (const count of [2, 5, 10, 11, 16])
+    for (let seed = 1; seed <= 8; seed++) {
+      const g = new Game(seed, 8);
+      for (let i = 0; i < count; i++)
+        g.join(String(i), i % 2 ? "BRAVO" : "ALPHA", 0);
+      for (const p of g.players.values()) g.ready(p.id);
+      const players = [...g.players.values()];
+      for (const a of players) {
+        assert.ok(a.x > 1 && a.x < g.map.side * 64 - 1);
+        assert.ok(a.z > 1 && a.z < g.map.side * 64 - 1);
+        for (const box of g.map.boxes(a.x, a.z, 3, false)) {
+          const dx = Math.max(0, Math.abs(a.x - box.x) - box.hx),
+            dz = Math.max(0, Math.abs(a.z - box.z) - box.hz);
+          assert.ok(Math.hypot(dx, dz) >= 0.4, `${count} players, seed ${seed}`);
+        }
+        for (const b of players)
+          if (a !== b)
+            assert.ok(Math.hypot(a.x - b.x, a.z - b.z) >= 0.85);
+      }
+      g.dispose();
+    }
 });
 test("banana triggers once, disables shooting and elimination ends round", () => {
   const g = new Game(1, 2);

@@ -232,7 +232,7 @@ onBeforeUnmount(() => disconnect());
             >Одинаковый код — один офис. Поделитесь им с другом.</small
           >
           <div class="loadout">
-            <Icon name="power" /><Icon name="banana" /><Icon name="gun" /><span
+            <Icon name="glow" /><Icon name="banana" /><Icon name="gun" /><span
               >СТАНДАРТНОЕ СНАРЯЖЕНИЕ</span
             >
           </div>
@@ -301,8 +301,8 @@ onBeforeUnmount(() => disconnect());
           @click="engine?.trigger(1)"
           :disabled="(self?.lightCd ?? 0) > 0"
         >
-          <kbd>1</kbd><Icon name="power" /><span>{{
-            self?.lightCd ? Math.ceil(self.lightCd) + " c" : "РУБИЛЬНИК"
+          <kbd>1</kbd><Icon name="glow" /><span>{{
+            self?.lightCd ? Math.ceil(self.lightCd) + " c" : "ХИМСВЕТ"
           }}</span>
           <div
             v-if="self?.lightCd"

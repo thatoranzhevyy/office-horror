@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateChunk, WorldMap, CHUNK, CELL } from "../shared/map.ts";
+import {
+  generateChunk,
+  WorldMap,
+  CHUNK,
+  CELL,
+  mapChunksForPlayers,
+} from "../shared/map.ts";
 import { castRay, visible, segmentCircle } from "../shared/visibility.ts";
 test("same seed and coordinates reproduce full geometry and different seeds differ", () => {
   assert.deepEqual(generateChunk(71, -1, 2), generateChunk(71, -1, 2));
@@ -71,10 +77,26 @@ test("wall stops ray before target and blocks sight", () => {
   );
   assert.equal(segmentCircle(0, 0, 1, 0, 5, 0, 0.4), 4.6);
 });
-test("world resolves negative cells and generates bounded local neighborhoods", () => {
-  const w = new WorldMap(9);
-  w.near(-1, -1, 1);
-  assert.equal(w.chunks.size, 9);
+test("square arena size follows the player count and closes its perimeter", () => {
+  assert.equal(mapChunksForPlayers(2), 1);
+  assert.equal(mapChunksForPlayers(4), 1);
+  assert.equal(mapChunksForPlayers(5), 2);
+  assert.equal(mapChunksForPlayers(10), 2);
+  assert.equal(mapChunksForPlayers(11), 3);
+  const w = new WorldMap(9, 2);
+  assert.equal(w.near(0, 0, 1).length, 4);
+  assert.equal(w.chunks.size, 4);
   assert.equal(CELL, 2);
-  assert.ok(w.get(-1, -1));
+  assert.equal(w.get(-1, -1), undefined);
+  assert.equal(w.get(2, 0), undefined);
+  for (let cz = 0; cz < 2; cz++)
+    for (let cx = 0; cx < 2; cx++) {
+      const c = w.get(cx, cz)!;
+      for (let i = 0; i < CHUNK; i++) {
+        if (cx === 0) assert.equal(c.cells[i * CHUNK], 1);
+        if (cx === 1) assert.equal(c.cells[i * CHUNK + CHUNK - 1], 1);
+        if (cz === 0) assert.equal(c.cells[i], 1);
+        if (cz === 1) assert.equal(c.cells[(CHUNK - 1) * CHUNK + i], 1);
+      }
+    }
 });
