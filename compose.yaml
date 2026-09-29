@@ -1,0 +1,9 @@
+services:
+  office-horror:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      TEAM_SIZE: "2"
+      PORT: "3001"
+    restart: unless-stopped
